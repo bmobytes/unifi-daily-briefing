@@ -1,0 +1,48 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: unifi-daily-briefing-reporter
+  namespace: unifi-daily-briefing
+  labels:
+    app.kubernetes.io/name: unifi-daily-briefing
+    app.kubernetes.io/component: reporter
+    app.kubernetes.io/part-of: unifi-daily-briefing
+spec:
+  schedule: '5 8 * * *'
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: unifi-daily-briefing
+            app.kubernetes.io/component: reporter
+            app.kubernetes.io/part-of: unifi-daily-briefing
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: reporter
+              image: ghcr.io/bmobytes/unifi-daily-briefing:latest
+              imagePullPolicy: IfNotPresent
+              command: ["unifi-daily-briefing"]
+              args: ["report"]
+              envFrom:
+                - configMapRef:
+                    name: unifi-daily-briefing-config
+                - secretRef:
+                    name: unifi-daily-briefing-secrets
+              volumeMounts:
+                - name: data
+                  mountPath: /data
+              resources:
+                requests:
+                  cpu: 25m
+                  memory: 128Mi
+                limits:
+                  memory: 256Mi
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: unifi-daily-briefing-data

@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: unifi-daily-briefing
+  labels:
+    app.kubernetes.io/name: unifi-daily-briefing
+    app.kubernetes.io/part-of: unifi-daily-briefing

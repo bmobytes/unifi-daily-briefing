@@ -1,0 +1,35 @@
+[project]
+name = "unifi-daily-briefing"
+version = "0.1.0"
+description = "Spicy UniFi daily network briefing service"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115.0",
+  "jinja2>=3.1.0",
+  "pydantic-settings>=2.6.0",
+  "requests>=2.32.0",
+  "uvicorn>=0.32.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.28.0",
+  "pytest>=8.3.0",
+]
+
+[project.scripts]
+unifi-daily-briefing = "unifi_daily_briefing.cli:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

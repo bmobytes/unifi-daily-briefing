@@ -1,0 +1,27 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: unifi-daily-briefing
+  namespace: unifi-daily-briefing
+  labels:
+    app.kubernetes.io/name: unifi-daily-briefing
+    app.kubernetes.io/part-of: unifi-daily-briefing
+  annotations:
+    cert-manager.io/cluster-issuer: lab-ca
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - unifi-daily-briefing.lab.bartos.media
+      secretName: unifi-daily-briefing-tls
+  rules:
+    - host: unifi-daily-briefing.lab.bartos.media
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: unifi-daily-briefing
+                port:
+                  number: 80

@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: unifi-daily-briefing-config
+  namespace: unifi-daily-briefing
+  labels:
+    app.kubernetes.io/name: unifi-daily-briefing
+    app.kubernetes.io/part-of: unifi-daily-briefing
+data:
+  UDB_DATABASE_PATH: /data/unifi_daily_briefing.db
+  UDB_UNIFI_SITE: default
+  UDB_UNIFI_VERIFY_SSL: "false"
+  UDB_UNIFI_AUTH_MODE: classic
+  UDB_REPORT_CHANNEL_ID: "1475528008998588647"
+  UDB_SAMPLE_CRON: '*/15 * * * *'
+  UDB_REPORT_CRON: '5 8 * * *'
+  UDB_DAILY_REPORT_HOUR: "8"
+  UDB_INGRESS_HOST: unifi-daily-briefing.lab.bartos.media
+  UDB_BRAIN_REPORTS_DIR: ""

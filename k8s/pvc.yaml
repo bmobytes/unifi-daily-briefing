@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: unifi-daily-briefing-data
+  namespace: unifi-daily-briefing
+  labels:
+    app.kubernetes.io/name: unifi-daily-briefing
+    app.kubernetes.io/part-of: unifi-daily-briefing
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 5Gi
