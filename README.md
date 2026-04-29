@@ -7,6 +7,8 @@ FastAPI service plus CLI for collecting UniFi telemetry, storing snapshots and r
 - Read-only UniFi polling
 - Supports classic UniFi OS cookie auth with username/password
 - Supports optional official local Integration API key mode
+- Supports optional remote `api.ui.com` connector mode with explicit or auto-discovered console ID
+- Official API collection enriches client and device inventory with per-item detail lookups, per-device latest statistics, DPI reference probes, and a stored endpoint capability report
 - SQLite persistence on a mounted volume
 - Manual report runs plus web UI for latest and historic reports
 - Optional Discord delivery by webhook or bot token
@@ -25,6 +27,7 @@ FastAPI service plus CLI for collecting UniFi telemetry, storing snapshots and r
 | `UDB_UNIFI_USERNAME` | Classic API username | none |
 | `UDB_UNIFI_PASSWORD` | Classic API password | none |
 | `UDB_UNIFI_API_KEY` | Integration API key | none |
+| `UDB_UNIFI_CONSOLE_ID` | Optional remote connector console ID for `https://api.ui.com` mode. If omitted, the collector will try `GET /v1/hosts` with the same API key and use the first host ID it can read. | empty |
 | `UDB_REPORT_CHANNEL_ID` | Discord channel ID | `1475528008998588647` |
 | `UDB_DISCORD_WEBHOOK_URL` | Discord webhook for direct post | empty |
 | `UDB_DISCORD_BOT_TOKEN` | Discord bot token for channel post | empty |

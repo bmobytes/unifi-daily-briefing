@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     unifi_username: str = ""
     unifi_password: str = ""
     unifi_api_key: str = ""
+    unifi_console_id: str = ""
 
     report_channel_id: str = "1475528008998588647"
     discord_webhook_url: str = ""

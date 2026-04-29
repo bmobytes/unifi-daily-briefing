@@ -9,12 +9,17 @@ def _client_name(client: dict[str, Any]) -> str:
     return client.get("name") or client.get("hostname") or client.get("mac") or "unknown-client"
 
 
+def _has_byte_counters(client: dict[str, Any]) -> bool:
+    return any(key in client and client.get(key) is not None for key in ("rx_bytes", "tx_bytes"))
+
+
 def _bytes_used(client: dict[str, Any]) -> int:
     return int(client.get("rx_bytes", 0)) + int(client.get("tx_bytes", 0))
 
 
 def _pick_top_clients(clients: list[dict[str, Any]], limit: int = 5) -> list[dict[str, Any]]:
-    ordered = sorted(clients, key=_bytes_used, reverse=True)
+    measurable = [item for item in clients if _has_byte_counters(item)]
+    ordered = sorted(measurable, key=_bytes_used, reverse=True)
     return [
         {
             "name": _client_name(item),
@@ -79,6 +84,8 @@ def analyze_snapshots(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
     dpi = _top_dpi(latest)
     health = _device_health(latest)
     unavailable = sorted({str(c) for c in (latest.get("unavailable_capabilities") or []) if c})
+    has_bandwidth_data = any(_has_byte_counters(client) for client in clients)
+    dpi_reference_count = len(latest.get("dpi_applications_reference") or [])
 
     aps = Counter((client.get("ap_name") or "unknown") for client in clients)
     busiest_aps = [{"ap": name, "clients": count} for name, count in aps.most_common(5)]
@@ -96,6 +103,10 @@ def analyze_snapshots(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
             + ", ".join(unavailable)
             + ". Some sections below report no data because the controller never returned any."
         )
+    if clients and not has_bandwidth_data:
+        recommendations.append(
+            "The official client endpoints did not expose rx/tx byte counters, so this report cannot rank bandwidth hogs yet."
+        )
     if not recommendations:
         recommendations.append("Nothing is on fire. Do not get cocky, it just means the network behaved for one whole day.")
 
@@ -107,6 +118,8 @@ def analyze_snapshots(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
         "busiest_aps": busiest_aps,
         "device_health": health,
         "unavailable_capabilities": unavailable,
+        "has_bandwidth_data": has_bandwidth_data,
+        "dpi_reference_count": dpi_reference_count,
         "recommendations": recommendations,
         "snapshot_count": len(snapshots),
     }
@@ -126,6 +139,8 @@ def render_markdown(report_date: str, findings: dict[str, Any]) -> str:
             lines.append(
                 f"- **{client['name']}**: {client['download_mb']} MB down, {client['upload_mb']} MB up, AP `{client['ap']}`, RSSI `{client['rssi']}`"
             )
+    elif not findings.get("has_bandwidth_data", True):
+        lines.append("- Controller client endpoints did not expose byte counters; no bandwidth ranking available")
     else:
         lines.append("- No client data collected")
 
@@ -150,6 +165,8 @@ def render_markdown(report_date: str, findings: dict[str, Any]) -> str:
     if findings["top_dpi"]:
         for item in findings["top_dpi"]:
             lines.append(f"- **{item['name']}**: {round(item['bytes'] / 1024 / 1024, 1)} MB")
+    elif "traffic" in unavailable and findings.get("dpi_reference_count", 0):
+        lines.append("- Controller exposed DPI reference metadata only; no traffic usage counters were available")
     elif "traffic" in unavailable:
         lines.append("- Controller did not expose the traffic capability; no DPI-style breakdown available")
     else:

@@ -22,6 +22,7 @@ class BriefingService:
                 password=settings.unifi_password,
                 api_key=settings.unifi_api_key,
                 site=settings.unifi_site,
+                console_id=settings.unifi_console_id,
             )
         )
         self.discord = DiscordDelivery(
