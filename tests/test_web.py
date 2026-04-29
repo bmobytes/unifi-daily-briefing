@@ -8,8 +8,9 @@ from unifi_daily_briefing.web import create_app
 
 
 class FakeService(BriefingService):
-    def __init__(self, tmp_path: Path):
+    def __init__(self, tmp_path: Path, unavailable_capabilities: list[str] | None = None):
         super().__init__(Settings(database_path=tmp_path / "test.db"))
+        self.unavailable_capabilities = unavailable_capabilities or []
 
     def collect(self):
         payload = {
@@ -17,6 +18,10 @@ class FakeService(BriefingService):
             "clients": [{"name": "laptop", "rx_bytes": 10, "tx_bytes": 5, "ap_name": "office-ap", "rssi": -60}],
             "devices": [{"name": "office-ap", "num_sta": 1}],
             "dpi": [{"app": "HTTPS", "total_bytes": 15}],
+            "health": [],
+            "wifi": [],
+            "traffic": [],
+            "unavailable_capabilities": self.unavailable_capabilities,
         }
         collected_at = "2026-04-29T00:00:00Z"
         snapshot_id = self.db.add_snapshot(collected_at, payload)
@@ -43,3 +48,21 @@ def test_web_endpoints(tmp_path: Path):
     page = client.get("/")
     assert page.status_code == 200
     assert "UniFi Daily Briefing" in page.text
+
+
+def test_web_surfaces_unavailable_capabilities(tmp_path: Path):
+    service = FakeService(tmp_path, unavailable_capabilities=["health", "traffic", "wifi"])
+    app = create_app(service)
+    client = TestClient(app)
+
+    report_response = client.post("/api/reports/run")
+    assert report_response.status_code == 200
+    report = report_response.json()
+
+    assert report["findings"]["unavailable_capabilities"] == ["health", "traffic", "wifi"]
+    assert "Unavailable controller capabilities" in report["markdown"]
+    assert "`traffic` endpoint was not exposed" in report["markdown"]
+
+    latest = client.get("/api/reports/latest")
+    assert latest.status_code == 200
+    assert latest.json()["findings"]["unavailable_capabilities"] == ["health", "traffic", "wifi"]

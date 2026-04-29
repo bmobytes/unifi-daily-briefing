@@ -78,6 +78,7 @@ def analyze_snapshots(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
     problem_clients = _wifi_problem_clients(clients)
     dpi = _top_dpi(latest)
     health = _device_health(latest)
+    unavailable = sorted({str(c) for c in (latest.get("unavailable_capabilities") or []) if c})
 
     aps = Counter((client.get("ap_name") or "unknown") for client in clients)
     busiest_aps = [{"ap": name, "clients": count} for name, count in aps.most_common(5)]
@@ -89,6 +90,12 @@ def analyze_snapshots(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
         recommendations.append(f"{busiest_aps[0]['ap']} is hoarding clients. Rebalance radios or tweak minimum RSSI so sticky clients get kicked loose.")
     if top_clients and top_clients[0]["download_mb"] > 10000:
         recommendations.append(f"{top_clients[0]['name']} absolutely body-slammed the WAN today. If that was backups, fine. If not, go investigate the bandwidth goblin.")
+    if unavailable:
+        recommendations.append(
+            "Cloud-managed gateway did not expose: "
+            + ", ".join(unavailable)
+            + ". Some sections below report no data because the controller never returned any."
+        )
     if not recommendations:
         recommendations.append("Nothing is on fire. Do not get cocky, it just means the network behaved for one whole day.")
 
@@ -99,6 +106,7 @@ def analyze_snapshots(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
         "top_dpi": dpi,
         "busiest_aps": busiest_aps,
         "device_health": health,
+        "unavailable_capabilities": unavailable,
         "recommendations": recommendations,
         "snapshot_count": len(snapshots),
     }
@@ -121,12 +129,16 @@ def render_markdown(report_date: str, findings: dict[str, Any]) -> str:
     else:
         lines.append("- No client data collected")
 
+    unavailable = findings.get("unavailable_capabilities") or []
+
     lines.extend(["", "## WiFi improvement targets"])
     if findings["problem_clients"]:
         for client in findings["problem_clients"]:
             lines.append(
                 f"- **{client['name']}** on `{client['ap']}` looks crusty, RSSI `{client['rssi']}`, retries `{client['retries']}`"
             )
+    elif "wifi" in unavailable:
+        lines.append("- Controller did not expose the WiFi capability; no SSID-level summary available")
     else:
         lines.append("- No obvious garbage-fire clients in the latest sample")
 
@@ -138,6 +150,8 @@ def render_markdown(report_date: str, findings: dict[str, Any]) -> str:
     if findings["top_dpi"]:
         for item in findings["top_dpi"]:
             lines.append(f"- **{item['name']}**: {round(item['bytes'] / 1024 / 1024, 1)} MB")
+    elif "traffic" in unavailable:
+        lines.append("- Controller did not expose the traffic capability; no DPI-style breakdown available")
     else:
         lines.append("- DPI data was not exposed by this controller sample")
 
@@ -145,8 +159,15 @@ def render_markdown(report_date: str, findings: dict[str, Any]) -> str:
     if findings["device_health"]:
         for complaint in findings["device_health"]:
             lines.append(f"- {complaint}")
+    elif "health" in unavailable:
+        lines.append("- Controller did not expose the health capability; no controller-level health summary available")
     else:
         lines.append("- UniFi gear looked healthy in the sampled data")
+
+    if unavailable:
+        lines.extend(["", "## Unavailable controller capabilities"])
+        for capability in unavailable:
+            lines.append(f"- `{capability}` endpoint was not exposed by this controller")
 
     lines.extend(["", "## Recommendations"])
     for item in findings["recommendations"]:

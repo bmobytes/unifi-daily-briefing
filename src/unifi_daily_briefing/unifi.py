@@ -6,6 +6,37 @@ from typing import Any
 import requests
 
 
+# Endpoints whose absence on Cloud Gateway Fiber (and similar trimmed-down
+# integration APIs) should degrade gracefully rather than abort the snapshot.
+OPTIONAL_OFFICIAL_CAPABILITIES = ("health", "wifi", "traffic")
+
+
+def _normalize_collection(payload: Any) -> list[Any]:
+    """Return a plain list from a UniFi integration-API response.
+
+    The official API may return either a bare list or a paginated wrapper
+    shaped like ``{"data": [...], "count": N, "limit": N, "offset": 0,
+    "totalCount": N}``. Anything else (None, scalar, unexpected dict) becomes
+    an empty list.
+    """
+    if payload is None:
+        return []
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        data = payload.get("data")
+        if isinstance(data, list):
+            return data
+    return []
+
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 @dataclass
 class UniFiConfig:
     base_url: str
@@ -43,29 +74,75 @@ class UniFiClient:
 
     def _collect_official(self) -> dict[str, Any]:
         headers = {"X-API-KEY": self.config.api_key, "Accept": "application/json"}
-        sites = self.session.get(
-            f"{self.base_url}/proxy/network/integration/v1/sites",
-            headers=headers,
-            timeout=30,
-        ).json()
+        sites = self._get_collection(f"{self.base_url}/proxy/network/integration/v1/sites", headers)
         site = self.config.site
         if site == "default" and sites:
-            site = sites[0].get("name") or sites[0].get("id") or site
+            site = sites[0].get("id") or sites[0].get("name") or site
         prefix = f"{self.base_url}/proxy/network/integration/v1/sites/{site}"
-        return {
+
+        unavailable: list[str] = []
+        snapshot: dict[str, Any] = {
             "site": site,
             "sites": sites,
-            "clients": self._safe_get(f"{prefix}/clients", headers),
-            "devices": self._safe_get(f"{prefix}/devices", headers),
-            "health": self._safe_get(f"{prefix}/health", headers),
-            "wifi": self._safe_get(f"{prefix}/wifi", headers),
-            "traffic": self._safe_get(f"{prefix}/traffic", headers),
+            "clients": self._get_collection(f"{prefix}/clients", headers),
+            "devices": self._get_collection(f"{prefix}/devices", headers),
         }
+        for capability in OPTIONAL_OFFICIAL_CAPABILITIES:
+            snapshot[capability] = self._get_collection(
+                f"{prefix}/{capability}", headers, capability, unavailable
+            )
+        snapshot["unavailable_capabilities"] = unavailable
+        return snapshot
 
-    def _safe_get(self, url: str, headers: dict[str, str]) -> Any:
-        response = self.session.get(url, headers=headers, timeout=30)
+    def _safe_get(self, url: str, headers: dict[str, str], params: dict[str, Any] | None = None) -> Any:
+        response = self.session.get(url, headers=headers, timeout=30, params=params)
         response.raise_for_status()
         return response.json()
+
+    def _get_collection(
+        self,
+        url: str,
+        headers: dict[str, str],
+        capability: str | None = None,
+        unavailable: list[str] | None = None,
+    ) -> list[Any]:
+        """Collect a full list from the official API, following pagination.
+
+        When ``capability`` is provided, HTTP 404 is treated as a missing
+        capability and returns an empty list instead of aborting the snapshot.
+        """
+        response = self.session.get(url, headers=headers, timeout=30)
+        if capability and response.status_code == 404:
+            if unavailable is not None:
+                unavailable.append(capability)
+            return []
+        response.raise_for_status()
+        payload = response.json()
+        items = _normalize_collection(payload)
+        if not isinstance(payload, dict) or "data" not in payload:
+            return items
+
+        total_count = _int_or_none(payload.get("totalCount"))
+        current_offset = _int_or_none(payload.get("offset")) or 0
+        page_limit = _int_or_none(payload.get("limit")) or len(items)
+        if not total_count or page_limit <= 0 or len(items) >= total_count:
+            return items
+
+        collected = list(items)
+        next_offset = current_offset + page_limit
+        while next_offset < total_count:
+            page_payload = self._safe_get(url, headers, params={"offset": next_offset, "limit": page_limit})
+            page_items = _normalize_collection(page_payload)
+            if not page_items:
+                break
+            collected.extend(page_items)
+            if isinstance(page_payload, dict):
+                page_offset = _int_or_none(page_payload.get("offset"))
+                page_limit = _int_or_none(page_payload.get("limit")) or page_limit
+                next_offset = (page_offset if page_offset is not None else next_offset) + page_limit
+            else:
+                next_offset += page_limit
+        return collected
 
     def _login_classic(self) -> None:
         if not self.config.username or not self.config.password:
