@@ -61,7 +61,7 @@ def test_web_surfaces_unavailable_capabilities(tmp_path: Path):
 
     assert report["findings"]["unavailable_capabilities"] == ["health", "traffic", "wifi"]
     assert "Unavailable controller capabilities" in report["markdown"]
-    assert "`traffic` endpoint was not exposed" in report["markdown"]
+    assert "Effective report gap: `traffic` was not exposed by any available source" in report["markdown"]
 
     latest = client.get("/api/reports/latest")
     assert latest.status_code == 200
