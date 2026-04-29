@@ -10,7 +10,12 @@ from .config import Settings, get_settings
 from .service import BriefingService
 
 
-TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
+TEMPLATE_CANDIDATES = [
+    Path(__file__).resolve().parents[2] / "templates",
+    Path("/app/templates"),
+    Path.cwd() / "templates",
+]
+TEMPLATES_DIR = next((path for path in TEMPLATE_CANDIDATES if path.exists()), TEMPLATE_CANDIDATES[0])
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
