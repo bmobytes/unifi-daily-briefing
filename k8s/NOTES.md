@@ -29,7 +29,7 @@ Create a Kubernetes Secret named `unifi-daily-briefing-secrets` in the `unifi-da
 - `UDB_DISCORD_WEBHOOK_URL`
 - `UDB_DISCORD_BOT_TOKEN`
 
-Use either classic auth with username and password, or API key auth. Do not set both unless you intentionally want classic auth to remain the default. `secret.example.yaml` documents the field names only and should not be applied as-is.
+Use either classic auth with username and password, or API key auth. The current cluster deployment is intended to use API key auth by default. Do not set both unless you intentionally want classic auth to remain the default. `secret.example.yaml` documents the field names only and should not be applied as-is.
 
 ## Brain writer
 

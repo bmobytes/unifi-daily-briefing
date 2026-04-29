@@ -10,7 +10,7 @@ data:
   UDB_DATABASE_PATH: /data/unifi_daily_briefing.db
   UDB_UNIFI_SITE: default
   UDB_UNIFI_VERIFY_SSL: "false"
-  UDB_UNIFI_AUTH_MODE: classic
+  UDB_UNIFI_AUTH_MODE: api_key
   UDB_REPORT_CHANNEL_ID: "1475528008998588647"
   UDB_SAMPLE_CRON: '*/15 * * * *'
   UDB_REPORT_CRON: '5 8 * * *'
