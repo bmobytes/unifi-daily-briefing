@@ -73,6 +73,27 @@ def _wifi_problem_clients(clients: list[dict[str, Any]]) -> list[dict[str, Any]]
     return noisy[:5]
 
 
+def _device_name(device: dict[str, Any]) -> str:
+    return device.get("name") or device.get("hostname") or device.get("mac") or device.get("macAddress") or "unknown-device"
+
+
+def _is_wifi_ap(device: dict[str, Any]) -> bool:
+    device_type = str(device.get("type") or device.get("device_type") or "").lower()
+    model = str(device.get("model") or device.get("modelDisplayName") or device.get("shortname") or "").lower()
+    if device_type in {"uap", "ap", "access_point", "accesspoint"}:
+        return True
+    if device_type in {"usw", "switch", "ugw", "uxg", "gateway", "udm", "uck"}:
+        return False
+    radios = device.get("radio_table") or device.get("radios") or (device.get("interfaces") or {}).get("radios") or []
+    if isinstance(radios, list) and radios:
+        return True
+    return model.startswith(("uap", "u6", "u7")) or "access point" in model
+
+
+def _ap_device_names(snapshot: dict[str, Any]) -> set[str]:
+    return {_device_name(device) for device in snapshot.get("devices") or [] if _is_wifi_ap(device)}
+
+
 def _top_dpi(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     dpi = snapshot.get("dpi") or snapshot.get("traffic") or []
     flattened = []
@@ -91,11 +112,11 @@ def _device_health(snapshot: dict[str, Any]) -> list[str]:
     devices = snapshot.get("devices") or []
     complaints = []
     for device in devices:
-        name = device.get("name") or device.get("hostname") or device.get("mac") or device.get("macAddress") or "unknown-device"
+        name = _device_name(device)
         state = device.get("state")
         if state in (0, "disconnected") or device.get("status") == "offline":
             complaints.append(f"{name} is offline")
-        elif int(device.get("num_sta", 0)) > 40:
+        elif _is_wifi_ap(device) and int(device.get("num_sta", 0)) > 40:
             complaints.append(f"{name} is carrying {device.get('num_sta')} clients, stop dogpiling one AP")
     return complaints[:6]
 
@@ -113,7 +134,9 @@ def _ap_radio_issues(snapshot: dict[str, Any]) -> list[str]:
             weak_by_ap[ap_name] += 1
 
     for device in snapshot.get("devices") or []:
-        name = device.get("name") or device.get("hostname") or "unknown-device"
+        if not _is_wifi_ap(device):
+            continue
+        name = _device_name(device)
         radio_table = device.get("radio_table") or []
         for radio in radio_table:
             if not isinstance(radio, dict):
@@ -170,11 +193,19 @@ def analyze_snapshots(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
     dpi_reference_count = len(latest.get("dpi_applications_reference") or [])
     source_map = _metric_sources(latest, has_bandwidth_data)
 
-    aps = Counter(
+    ap_names = _ap_device_names(latest)
+    uplink_counts = Counter(
         (client.get("ap_name") or client.get("last_uplink_name") or "unknown")
         for client in clients
     )
-    busiest_aps = [{"ap": name, "clients": count} for name, count in aps.most_common(5)]
+    if ap_names:
+        busiest_aps = [
+            {"ap": name, "clients": count}
+            for name, count in uplink_counts.most_common()
+            if name in ap_names
+        ][:5]
+    else:
+        busiest_aps = [{"ap": name, "clients": count} for name, count in uplink_counts.most_common(5)]
 
     recommendations = []
     if problem_clients:

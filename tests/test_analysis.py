@@ -78,3 +78,43 @@ def test_analyze_skips_fake_bandwidth_when_counters_are_missing():
     assert findings["dpi_reference_count"] == 1
     assert "no bandwidth ranking available" in markdown
     assert "reference metadata only" in markdown
+
+
+def test_switches_with_many_wired_clients_do_not_get_ap_advice():
+    wired_clients = [
+        {"name": f"wired-{idx}", "last_uplink_name": "MSN-LS-USW-AS-01"}
+        for idx in range(30)
+    ]
+    snapshots = [
+        {
+            "payload": {
+                "clients": wired_clients,
+                "devices": [
+                    {
+                        "name": "MSN-LS-USW-AS-01",
+                        "type": "usw",
+                        "model": "USW-Pro-48",
+                        "num_sta": 30,
+                        "port_table": [{"port_idx": 1}],
+                    },
+                    {
+                        "name": "office-ap",
+                        "type": "uap",
+                        "model": "U6-Pro",
+                        "num_sta": 3,
+                        "radio_table": [{"name": "wifi0", "channel": 11}],
+                    },
+                ],
+                "source_summary": {"client_inventory": "official", "device_inventory": "official"},
+            }
+        }
+    ]
+
+    findings = analyze_snapshots(snapshots)
+    markdown = render_markdown("2026-04-29", findings)
+
+    assert all(item["ap"] != "MSN-LS-USW-AS-01" for item in findings["busiest_aps"])
+    assert "MSN-LS-USW-AS-01 is hoarding clients" not in markdown
+    assert "minimum RSSI" not in markdown
+    assert "sticky clients" not in markdown
+    assert "stop dogpiling one AP" not in markdown

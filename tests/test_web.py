@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
 
@@ -23,7 +24,7 @@ class FakeService(BriefingService):
             "traffic": [],
             "unavailable_capabilities": self.unavailable_capabilities,
         }
-        collected_at = "2026-04-29T00:00:00Z"
+        collected_at = datetime.now(timezone.utc).isoformat()
         snapshot_id = self.db.add_snapshot(collected_at, payload)
         return {"snapshot_id": snapshot_id, "collected_at": collected_at, "payload": payload}
 
