@@ -25,6 +25,53 @@ def _download_bytes(client: dict[str, Any]) -> int:
     return int(client.get("rx_bytes", 0))
 
 
+def _normalize_mac(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    return value.strip().lower().replace("-", ":")
+
+
+def _client_mac(client: dict[str, Any]) -> str:
+    return _normalize_mac(client.get("mac") or client.get("macAddress"))
+
+
+def _client_ip(client: dict[str, Any]) -> str | None:
+    for key in ("ip", "ipAddress", "ipv4", "ip_address", "fixed_ip"):
+        value = client.get(key)
+        if value:
+            return value
+    return None
+
+
+def _client_match_id(client: dict[str, Any]) -> str | None:
+    """Stable id for matching the same client across snapshots."""
+    mac = _client_mac(client)
+    if mac:
+        return f"mac:{mac}"
+    for key in ("_id", "id", "user_id", "client_id"):
+        value = client.get(key)
+        if value:
+            return f"{key}:{value}"
+    name = client.get("name") or client.get("hostname")
+    if name:
+        return f"name:{name}"
+    return None
+
+
+def _client_entry(client: dict[str, Any], *, download_bytes: int, upload_bytes: int) -> dict[str, Any]:
+    return {
+        "name": _client_name(client),
+        "mac": _client_mac(client) or None,
+        "ip": _client_ip(client),
+        "download_mb": round(download_bytes / 1024 / 1024, 1),
+        "upload_mb": round(upload_bytes / 1024 / 1024, 1),
+        "ap": client.get("ap_name") or client.get("last_uplink_name") or client.get("essid") or "unknown",
+        "rssi": client.get("signal") if client.get("signal") is not None else client.get("rssi"),
+        "signal": client.get("signal") if client.get("signal") is not None else client.get("rssi"),
+        "retries": client.get("tx_retries") or client.get("retries") or 0,
+    }
+
+
 def _top_bandwidth_clients(
     clients: list[dict[str, Any]], *, limit: int = 5, key: str = "total"
 ) -> list[dict[str, Any]]:
@@ -36,16 +83,71 @@ def _top_bandwidth_clients(
     else:
         ordered = sorted(measurable, key=_bytes_used, reverse=True)
     return [
-        {
-            "name": _client_name(item),
-            "download_mb": round(_download_bytes(item) / 1024 / 1024, 1),
-            "upload_mb": round(_upload_bytes(item) / 1024 / 1024, 1),
-            "ap": item.get("ap_name") or item.get("last_uplink_name") or item.get("essid") or "unknown",
-            "rssi": item.get("signal") if item.get("signal") is not None else item.get("rssi"),
-            "signal": item.get("signal") if item.get("signal") is not None else item.get("rssi"),
-            "retries": item.get("tx_retries") or item.get("retries") or 0,
-        }
+        _client_entry(item, download_bytes=_download_bytes(item), upload_bytes=_upload_bytes(item))
         for item in ordered[:limit]
+    ]
+
+
+def _compute_bandwidth_deltas(
+    earliest_clients: list[dict[str, Any]], latest_clients: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Match clients across snapshots and compute per-client byte deltas.
+
+    Returns (deltas, counter_resets). Clients with no comparable baseline
+    are silently dropped from rankings; clients whose counters went down
+    are flagged as counter resets and excluded from rankings.
+    """
+    earliest_by_id: dict[str, dict[str, Any]] = {}
+    for client in earliest_clients:
+        cid = _client_match_id(client)
+        if cid and _has_byte_counters(client):
+            earliest_by_id[cid] = client
+
+    deltas: list[dict[str, Any]] = []
+    counter_resets: list[dict[str, Any]] = []
+    for client in latest_clients:
+        if not _has_byte_counters(client):
+            continue
+        cid = _client_match_id(client)
+        baseline = earliest_by_id.get(cid) if cid else None
+        if baseline is None:
+            continue
+        d_rx = _download_bytes(client) - _download_bytes(baseline)
+        d_tx = _upload_bytes(client) - _upload_bytes(baseline)
+        if d_rx < 0 or d_tx < 0:
+            counter_resets.append(
+                {
+                    "name": _client_name(client),
+                    "mac": _client_mac(client) or None,
+                    "ip": _client_ip(client),
+                    "delta_rx_bytes": d_rx,
+                    "delta_tx_bytes": d_tx,
+                }
+            )
+            continue
+        deltas.append(
+            {
+                "client": client,
+                "delta_rx": d_rx,
+                "delta_tx": d_tx,
+                "delta_total": d_rx + d_tx,
+            }
+        )
+    return deltas, counter_resets
+
+
+def _top_bandwidth_from_deltas(
+    deltas: list[dict[str, Any]], *, limit: int = 5, key: str = "total"
+) -> list[dict[str, Any]]:
+    if key == "upload":
+        ordered = sorted(deltas, key=lambda d: d["delta_tx"], reverse=True)
+    elif key == "download":
+        ordered = sorted(deltas, key=lambda d: d["delta_rx"], reverse=True)
+    else:
+        ordered = sorted(deltas, key=lambda d: d["delta_total"], reverse=True)
+    return [
+        _client_entry(d["client"], download_bytes=d["delta_rx"], upload_bytes=d["delta_tx"])
+        for d in ordered[:limit]
     ]
 
 
@@ -180,10 +282,21 @@ def _metric_sources(snapshot: dict[str, Any], has_bandwidth_data: bool) -> dict[
 
 def analyze_snapshots(snapshots: list[dict[str, Any]], *, snapshot_count: int | None = None) -> dict[str, Any]:
     latest = snapshots[-1]["payload"] if snapshots else {}
+    earliest = snapshots[0]["payload"] if snapshots and len(snapshots) >= 2 else None
     clients = latest.get("clients") or []
-    top_clients = _top_bandwidth_clients(clients, key="total")
-    top_download_clients = _top_bandwidth_clients(clients, key="download")
-    top_upload_clients = _top_bandwidth_clients(clients, key="upload")
+
+    counter_resets: list[dict[str, Any]] = []
+    if earliest is not None:
+        deltas, counter_resets = _compute_bandwidth_deltas(earliest.get("clients") or [], clients)
+        top_clients = _top_bandwidth_from_deltas(deltas, key="total")
+        top_download_clients = _top_bandwidth_from_deltas(deltas, key="download")
+        top_upload_clients = _top_bandwidth_from_deltas(deltas, key="upload")
+        bandwidth_window = "daily"
+    else:
+        top_clients = _top_bandwidth_clients(clients, key="total")
+        top_download_clients = _top_bandwidth_clients(clients, key="download")
+        top_upload_clients = _top_bandwidth_clients(clients, key="upload")
+        bandwidth_window = "cumulative"
     problem_clients = _wifi_problem_clients(clients)
     dpi = _top_dpi(latest)
     health = _device_health(latest)
@@ -243,6 +356,8 @@ def analyze_snapshots(snapshots: list[dict[str, Any]], *, snapshot_count: int | 
         "unavailable_capabilities": unavailable,
         "unavailable_capabilities_by_source": latest.get("unavailable_capabilities_by_source") or {},
         "has_bandwidth_data": has_bandwidth_data,
+        "bandwidth_window": bandwidth_window,
+        "counter_resets": counter_resets,
         "dpi_reference_count": dpi_reference_count,
         "recommendations": recommendations,
         "snapshot_count": snapshot_count if snapshot_count is not None else len(snapshots),
@@ -264,30 +379,44 @@ def render_markdown(report_date: str, findings: dict[str, Any]) -> str:
     else:
         lines.append("- No source metadata was stored for this snapshot")
 
-    lines.extend(["", "## Top bandwidth clients"])
+    bandwidth_window = findings.get("bandwidth_window", "cumulative")
+    window_suffix = " (daily delta)" if bandwidth_window == "daily" else " (latest cumulative counter, only one snapshot in window)"
+    lines.extend(["", f"## Top bandwidth clients{window_suffix}"])
     if findings["top_clients"]:
         for client in findings["top_clients"]:
+            mac_part = f", MAC `{client['mac']}`" if client.get("mac") else ""
+            ip_part = f", IP `{client['ip']}`" if client.get("ip") else ""
             lines.append(
-                f"- **{client['name']}**: {client['download_mb']} MB down, {client['upload_mb']} MB up, AP `{client['ap']}`, signal `{client['rssi']}`"
+                f"- **{client['name']}**: {client['download_mb']} MB down, {client['upload_mb']} MB up, AP `{client['ap']}`, signal `{client['rssi']}`{mac_part}{ip_part}"
             )
     elif not findings.get("has_bandwidth_data", True):
         lines.append("- Controller client endpoints did not expose byte counters; no bandwidth ranking available")
+    elif bandwidth_window == "daily":
+        lines.append("- No clients had a comparable baseline across the report window; no daily bandwidth ranking available")
     else:
         lines.append("- No client data collected")
 
-    lines.extend(["", "## Top download clients"])
+    lines.extend(["", f"## Top download clients{window_suffix}"])
     if findings["top_download_clients"]:
         for client in findings["top_download_clients"]:
             lines.append(f"- **{client['name']}**: {client['download_mb']} MB down via `{client['ap']}`")
     else:
         lines.append("- No download ranking available")
 
-    lines.extend(["", "## Top upload clients"])
+    lines.extend(["", f"## Top upload clients{window_suffix}"])
     if findings["top_upload_clients"]:
         for client in findings["top_upload_clients"]:
             lines.append(f"- **{client['name']}**: {client['upload_mb']} MB up via `{client['ap']}`")
     else:
         lines.append("- No upload ranking available")
+
+    counter_resets = findings.get("counter_resets") or []
+    if counter_resets:
+        lines.extend(["", "## Counter resets (excluded from bandwidth rankings)"])
+        for reset in counter_resets:
+            mac_part = f" MAC `{reset['mac']}`" if reset.get("mac") else ""
+            ip_part = f" IP `{reset['ip']}`" if reset.get("ip") else ""
+            lines.append(f"- **{reset['name']}**{mac_part}{ip_part}: counters went backwards across the window")
 
     unavailable = findings.get("unavailable_capabilities") or []
 

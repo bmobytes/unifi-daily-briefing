@@ -76,6 +76,14 @@ class Database:
             ).fetchone()
         return self._snapshot_row(row) if row else None
 
+    def earliest_snapshot_since(self, iso_ts: str) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM snapshots WHERE collected_at >= ? ORDER BY collected_at ASC LIMIT 1",
+                (iso_ts,),
+            ).fetchone()
+        return self._snapshot_row(row) if row else None
+
     def latest_snapshot(self) -> dict | None:
         with self.connect() as conn:
             row = conn.execute("SELECT * FROM snapshots ORDER BY collected_at DESC LIMIT 1").fetchone()

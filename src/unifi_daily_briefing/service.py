@@ -48,7 +48,17 @@ class BriefingService:
             self.collect()
             snapshot_count = self.db.count_snapshots_since(since)
             latest_snapshot = self.db.latest_snapshot_since(since)
-        findings = analyze_snapshots([latest_snapshot] if latest_snapshot else [], snapshot_count=snapshot_count)
+        snapshots_for_analysis: list[dict] = []
+        if latest_snapshot is not None:
+            if snapshot_count >= 2:
+                earliest_snapshot = self.db.earliest_snapshot_since(since)
+                if earliest_snapshot and earliest_snapshot["id"] != latest_snapshot["id"]:
+                    snapshots_for_analysis = [earliest_snapshot, latest_snapshot]
+                else:
+                    snapshots_for_analysis = [latest_snapshot]
+            else:
+                snapshots_for_analysis = [latest_snapshot]
+        findings = analyze_snapshots(snapshots_for_analysis, snapshot_count=snapshot_count)
         markdown = render_markdown(report_date, findings)
         delivered = self.discord.send(markdown) if self.discord.enabled() else False
         written_brain = self.brain.write(report_date, markdown) if self.brain.enabled() else False
