@@ -60,6 +60,22 @@ class Database:
             ).fetchall()
         return [self._snapshot_row(row) for row in rows]
 
+    def count_snapshots_since(self, iso_ts: str) -> int:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM snapshots WHERE collected_at >= ?",
+                (iso_ts,),
+            ).fetchone()
+        return int(row[0]) if row else 0
+
+    def latest_snapshot_since(self, iso_ts: str) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM snapshots WHERE collected_at >= ? ORDER BY collected_at DESC LIMIT 1",
+                (iso_ts,),
+            ).fetchone()
+        return self._snapshot_row(row) if row else None
+
     def latest_snapshot(self) -> dict | None:
         with self.connect() as conn:
             row = conn.execute("SELECT * FROM snapshots ORDER BY collected_at DESC LIMIT 1").fetchone()

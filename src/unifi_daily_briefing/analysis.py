@@ -178,7 +178,7 @@ def _metric_sources(snapshot: dict[str, Any], has_bandwidth_data: bool) -> dict[
     return metric_sources
 
 
-def analyze_snapshots(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
+def analyze_snapshots(snapshots: list[dict[str, Any]], *, snapshot_count: int | None = None) -> dict[str, Any]:
     latest = snapshots[-1]["payload"] if snapshots else {}
     clients = latest.get("clients") or []
     top_clients = _top_bandwidth_clients(clients, key="total")
@@ -245,7 +245,7 @@ def analyze_snapshots(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
         "has_bandwidth_data": has_bandwidth_data,
         "dpi_reference_count": dpi_reference_count,
         "recommendations": recommendations,
-        "snapshot_count": len(snapshots),
+        "snapshot_count": snapshot_count if snapshot_count is not None else len(snapshots),
     }
 
 

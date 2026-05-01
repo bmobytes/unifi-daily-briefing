@@ -42,11 +42,13 @@ class BriefingService:
         now = datetime.now(timezone.utc)
         report_date = report_date or now.date().isoformat()
         since = (now - timedelta(days=1)).isoformat()
-        snapshots = self.db.list_snapshots_since(since)
-        if not snapshots:
+        snapshot_count = self.db.count_snapshots_since(since)
+        latest_snapshot = self.db.latest_snapshot_since(since)
+        if snapshot_count == 0 or latest_snapshot is None:
             self.collect()
-            snapshots = self.db.list_snapshots_since(since)
-        findings = analyze_snapshots(snapshots)
+            snapshot_count = self.db.count_snapshots_since(since)
+            latest_snapshot = self.db.latest_snapshot_since(since)
+        findings = analyze_snapshots([latest_snapshot] if latest_snapshot else [], snapshot_count=snapshot_count)
         markdown = render_markdown(report_date, findings)
         delivered = self.discord.send(markdown) if self.discord.enabled() else False
         written_brain = self.brain.write(report_date, markdown) if self.brain.enabled() else False
